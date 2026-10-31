@@ -145,6 +145,13 @@ button{font:inherit;color:inherit}
 #edges{position:absolute;top:0;left:0;overflow:visible;pointer-events:none}
 #nodes,#annos{position:absolute;top:0;left:0}
 #annos{pointer-events:none;transition:opacity .2s}
+#regions{position:absolute;top:0;left:0;pointer-events:none;opacity:0;transition:opacity .4s}
+#regions.show{opacity:1}
+.region{position:absolute;border-radius:16px;border:1px solid color-mix(in srgb,var(--rc) 30%,var(--border));
+  background:color-mix(in srgb,var(--rc) 6%,transparent)}
+.region .rt{position:absolute;top:11px;left:16px;display:flex;align-items:center;gap:7px;
+  font-size:12.5px;font-weight:650;color:color-mix(in srgb,var(--rc) 75%,var(--text));white-space:nowrap}
+.region .rt i{font:600 10px/1 var(--mono);color:var(--on-accent);background:var(--rc);border-radius:5px;padding:3px 5px}
 
 /* 节点卡片 */
 .node{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
@@ -342,7 +349,7 @@ button{font:inherit;color:inherit}
 </nav>
 <div id="backdrop"></div>
 
-<main id="viewport"><div id="canvas"><svg id="edges"></svg><div id="nodes"></div><div id="annos"></div></div></main>
+<main id="viewport"><div id="canvas"><div id="regions"></div><svg id="edges"></svg><div id="nodes"></div><div id="annos"></div></div></main>
 
 <section id="cap" aria-live="polite"></section>
 
@@ -663,6 +670,27 @@ const NOTES = {
   "resume→trigger":{"zh":"重放日志，接着干","en":"replay the log, pick up where it left off"}
 };
 
+/* 全景分区：最后一层（全景）按区块网格排列。
+ *   grid=[列,行] 是区块在宏观网格中的位置；at={节点:[列,行]} 是节点在区块内的格位。 */
+const REGIONS = [
+  { id:'A', dom:'trig', grid:[0,0], title:{zh:'入口与调度',en:'Ingress & Scheduling'},
+    at:{channels:[0,0],resume:[1,0],cron:[2,0],heart:[3,0],autoa:[4,0],route:[0,1],trigger:[1,2],lanes:[2,3]} },
+  { id:'B', dom:'intel', grid:[1,0], title:{zh:'上下文装配',en:'Context Assembly'},
+    at:{recall:[0,0],sysasm:[1,0],skills:[2,0],ctx:[1,1],h_in:[1,2]} },
+  { id:'C', dom:'core', grid:[0,1], title:{zh:'核心循环',en:'Core Loop'},
+    at:{llm:[1,0],fix:[0,1],err:[1,1],check:[1,2],h_stop:[0,3],h_pre:[2,3]} },
+  { id:'D', dom:'tool', grid:[1,1], title:{zh:'工具与安全',en:'Tools & Safety'},
+    at:{registry:[1,0],gate:[1,1],exec:[0,2],ask:[2,2],h_post:[0,3],blocked:[2,3],append:[1,4]} },
+  { id:'E', dom:'team', grid:[2,1], title:{zh:'扩展能力',en:'Capabilities'},
+    at:{mcp:[0,0],skload:[1,0],todo:[0,1],taskgraph:[1,1],bgt:[0,2],suba:[1,2],bus:[0,3],wt:[1,3]} },
+  { id:'G', dom:'ext', grid:[0,2], title:{zh:'出口',en:'Egress'},
+    at:{deliver:[0,0],out:[0,1]} },
+  { id:'F', dom:'mem', grid:[1,2], title:{zh:'上下文治理',en:'Context Governance'},
+    at:{observe:[0,0],budget:[1,0],sediment:[0,1],compact:[1,1],curate:[0,2]} },
+  { id:'H', dom:'obs', grid:[2,2], title:{zh:'可观测与持久化',en:'Observability & Persistence'},
+    at:{trace:[0,0],meter:[1,0],persist:[0,1]} },
+];
+
 const DOMAINS = ['core','tool','perm','hook','intel','mem','sys','team','trig','ext','obs'];
 const PROCS = ['main','aux','ext'];
 
@@ -719,6 +747,7 @@ const S={
   nodeOff:{}, edgeOff:{},          // 用户拖拽产生的偏移，换层时清空
   hover:null, selected:null, query:'',
   annoMode:0,                      // 0=本层 1=全部 2=关
+  regionMode:false, regionRects:[], // 全景层按区块排列
   pan:{x:0,y:0}, scale:1,
 };
 const $=id=>document.getElementById(id);
@@ -727,7 +756,7 @@ const t=(k,...a)=>{ const v=T(k); return typeof v==='function'?v(...a):v; };
 const tx=v=>v==null?'':(typeof v==='string'?v:(v[S.lang]??v.zh));      // 取双语字段
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const ekey=e=>e.from+'→'+e.to;
-const edgeOffOf=e=>S.edgeOff[ekey(e)]||(e.bend?{dx:e.bend,dy:0}:{dx:0,dy:0});
+const edgeOffOf=e=>S.edgeOff[ekey(e)]||(e.bend&&!S.regionMode?{dx:e.bend,dy:0}:{dx:0,dy:0});
 const isMobile=()=>window.matchMedia('(max-width:760px)').matches;
 
 /* 每个节点首次出现时的元信息（搜索 / 深层跳转用） */
@@ -774,6 +803,37 @@ function layout(nodes,edges){
   return {rank,x};
 }
 
+/* ====================== 全景：区块布局 ======================
+ * 每个区块按格位放节点；列宽取 R_COL 与块内最宽节点的较大值。区块保持自身宽度、在网格列内居中，同行区块等高。
+ * 返回 place[id]={cx,top,rank} 与区块矩形。未分区的节点（数据遗漏时）兜底放进最后一个区块的新行。 */
+const R_COL=200, R_ROW=88, R_PADX=22, R_PADT=46, R_PADB=64, R_GAP=56;
+function regionLayout(nodes,size){
+  const have=new Set(nodes.map(n=>n.id)), placed=new Set();
+  const blocks=REGIONS.map(R=>({R,at:Object.entries(R.at).filter(([id])=>have.has(id))}));
+  blocks.forEach(b=>b.at.forEach(([id])=>placed.add(id)));
+  const stray=nodes.filter(n=>!placed.has(n.id)).map(n=>n.id);
+  if(stray.length){ const b=blocks[blocks.length-1], r=Math.max(-1,...b.at.map(([,p])=>p[1]))+1;
+    stray.forEach((id,i)=>b.at.push([id,[i,r]])); }
+  const colW={}, rowH={};
+  blocks.forEach(b=>{ const cols=Math.max(0,...b.at.map(([,p])=>p[0]))+1, rows=Math.max(0,...b.at.map(([,p])=>p[1]))+1;
+    b.col=Math.max(R_COL,...b.at.map(([id])=>size[id].w+28));
+    b.w=cols*b.col+2*R_PADX; b.h=R_PADT+(rows-1)*R_ROW+R_PADB;
+    const [c,r]=b.R.grid; colW[c]=Math.max(colW[c]||0,b.w); rowH[r]=Math.max(rowH[r]||0,b.h); });
+  const offs=(m,k)=>{ let v=0; for(let i=0;i<k;i++) v+=(m[i]||0)+R_GAP; return v; };
+  const place={}, rects=[];
+  blocks.forEach(b=>{ const [c,r]=b.R.grid, bx=LEFT+offs(colW,c)+(colW[c]-b.w)/2, by=TOP+offs(rowH,r);
+    rects.push({R:b.R,x:bx,y:by,w:b.w,h:rowH[r]});
+    b.at.forEach(([id,[col,row]])=>{ place[id]={cx:bx+R_PADX+col*b.col+b.col/2, top:by+R_PADT+row*R_ROW, rank:0}; }); });
+  return {place,rects};
+}
+function drawRegions(){
+  const el=$('regions'); el.classList.toggle('show',S.regionMode);
+  if(!S.regionMode) return;
+  el.innerHTML=S.regionRects.map(({R,x,y,w,h})=>
+    `<div class="region" style="--rc:var(--d-${R.dom});left:${x}px;top:${y}px;width:${w}px;height:${h}px">`
+    +`<div class="rt"><i>${R.id}</i>${tx(R.title)}</div></div>`).join('');
+}
+
 /* ====================== 动画 ====================== */
 function tween(dur,onFrame,onDone){
   const t0=performance.now(); let stop=false;
@@ -799,27 +859,36 @@ function nodeHTML(n){
 function render(animate){
   S.graph=computeGraph(S.depth);
   const {nodes,edges}=S.graph;
-  const {rank,x}=layout(nodes,edges);
   const ids=new Set(nodes.map(n=>n.id));
   for(const [id,el] of [...nodeEls]) if(!ids.has(id)){
     el.classList.add('exit'); nodeEls.delete(id); delete S.pos[id]; setTimeout(()=>el.remove(),320);
   }
-  const target={};
+  // 先更新节点内容并量尺寸，区块布局要按实际宽度定列宽
+  const size={}, fresh=new Set(), cur=S.depth-1;
   for(const n of nodes){
-    let el=nodeEls.get(n.id); const fresh=!el;
-    if(fresh){ el=document.createElement('div'); el.dataset.id=n.id; el.tabIndex=0; el.setAttribute('role','button');
-      nodesEl.appendChild(el); nodeEls.set(n.id,el); }
-    const cur=S.depth-1;
+    let el=nodeEls.get(n.id);
+    if(!el){ el=document.createElement('div'); el.dataset.id=n.id; el.tabIndex=0; el.setAttribute('role','button');
+      nodesEl.appendChild(el); nodeEls.set(n.id,el); fresh.add(n.id); }
     el.className='node '+(n.type||'process');
     el.classList.toggle('added',S.depth>1&&(n.layer===cur||n.refined===cur));
     el.classList.toggle('sel',S.selected===n.id);
     el.style.setProperty('--nc',`var(--d-${n.dom})`);
     el.setAttribute('aria-label',tx(n.label));
     el.innerHTML=nodeHTML(n);
-    const w=el.offsetWidth, h=el.offsetHeight, off=S.nodeOff[n.id]||{dx:0,dy:0};
-    const autoLeft=LEFT+x[n.id]*COL_W-w/2, autoTop=TOP+rank[n.id]*ROW_H;
-    target[n.id]={x:autoLeft+off.dx,y:autoTop+off.dy,w,h,autoLeft,autoTop,rank:rank[n.id]};
-    if(fresh){ S.pos[n.id]={x:target[n.id].x,y:target[n.id].y}; placeEl(n.id);
+    size[n.id]={w:el.offsetWidth,h:el.offsetHeight};
+  }
+  S.regionMode=S.depth===LAYERS.length;
+  let place;
+  if(S.regionMode){ const r=regionLayout(nodes,size); place=r.place; S.regionRects=r.rects; }
+  else { const {rank,x}=layout(nodes,edges); place={};
+    nodes.forEach(n=>place[n.id]={cx:LEFT+x[n.id]*COL_W, top:TOP+rank[n.id]*ROW_H, rank:rank[n.id]}); }
+  drawRegions();
+  const target={};
+  for(const n of nodes){
+    const {w,h}=size[n.id], off=S.nodeOff[n.id]||{dx:0,dy:0};
+    const P=place[n.id], autoLeft=P.cx-w/2, autoTop=P.top;
+    target[n.id]={x:autoLeft+off.dx,y:autoTop+off.dy,w,h,autoLeft,autoTop,rank:P.rank};
+    if(fresh.has(n.id)){ const el=nodeEls.get(n.id); S.pos[n.id]={x:target[n.id].x,y:target[n.id].y}; placeEl(n.id);
       if(animate){ el.classList.add('enter'); requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.remove('enter'))); } }
   }
   applyQuery();
@@ -846,8 +915,12 @@ function drawEdges(){
   for(const e of S.graph.edges){
     const s=S.box[e.from],tb=S.box[e.to]; if(!s||!tb) continue;
     const key=ekey(e), off=edgeOffOf(e);
-    const sameRank=e.k!=='loop'&&tb.rank===s.rank;                       // lay:false 的边可能落在同一层
-    const isLoop=e.k==='loop'||(tb.rank<s.rank);
+    // 走线：down=自上而下；side=两侧水平；loop=绕到左侧回环。
+    // 自动布局按层号判断；全景区块布局没有统一层号，按两端的相对位置判断。
+    let route;
+    if(S.regionMode) route=tb.top>=s.bottom-4?'down':(tb.left>=s.right||tb.right<=s.left)?'side':'loop';
+    else route=e.k==='loop'||tb.rank<s.rank?'loop':tb.rank===s.rank?'side':'down';
+    const sameRank=route==='side', isLoop=route==='loop'||e.k==='loop';
     const cls=e.k==='yes'?'yes':e.k==='no'?'no':e.k==='soft'?'soft':isLoop?'loop':'';
     const hov=S.hover?((e.from===S.hover||e.to===S.hover)?' hi':' dim'):'';
     const note=NOTES[key]?tx(NOTES[key]):'';
@@ -857,14 +930,14 @@ function drawEdges(){
     const mk='ah'+(cls?'-'+cls:'');
     let hx,hy;
     if(sameRank){
-      // 同层：从相对的两侧水平连接
+      // 同层 / 左右相邻：从相对的两侧水平连接
       const rightward=tb.cx>=s.cx, sx=rightward?s.right:s.left, ex=rightward?tb.left:tb.right, sy=s.cy, ey=tb.cy;
       const mx=(sx+ex)/2, my=(sy+ey)/2; hx=mx+off.dx; hy=my+off.dy;
       const d=(off.dx||off.dy)?`M ${sx} ${sy} Q ${2*hx-mx} ${2*hy-my}, ${ex} ${ey}`:`M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ey}, ${ex} ${ey}`;
       svg+=`<path class="e ${cls}${hov}" marker-end="url(#${mk})" d="${d}"/>`;
       if(lbl) svg+=`<text class="elabel ${cls}${hov}" x="${mx}" y="${my-6}" text-anchor="middle">${lbl}</text>`;
       if(showNote) anno+=`<div class="anno${curCls}" style="left:${hx}px;top:${hy+14}px">${note}</div>`;
-    } else if(isLoop){
+    } else if(route==='loop'){
       // 回环边绕到两端节点左侧；控制点 x 放大 4/3 使中点手柄 1:1 跟手（t=.5 处 x=(两端+6gx)/8）
       const gx=Math.min(s.left,tb.left)-34-(loopIdx++%3)*15+off.dx*4/3, sy=s.cy, ty=tb.cy, my=(sy+ty)/2;
       hx=(s.left+tb.left+6*gx)/8; hy=my;
@@ -990,7 +1063,9 @@ function fit(){
   for(const id in S.target){ any=true; const g=S.target[id], p=S.nodeOff[id]?S.pos[id]:g;
     minX=Math.min(minX,p.x); minY=Math.min(minY,p.y); maxX=Math.max(maxX,p.x+g.w); maxY=Math.max(maxY,p.y+g.h); }
   if(!any) return;
-  minX-=110; maxX+=40; minY-=30; maxY+=30;                       // 给左侧回环线与注释留白
+  if(S.regionMode) S.regionRects.forEach(r=>{ minX=Math.min(minX,r.x); minY=Math.min(minY,r.y);
+    maxX=Math.max(maxX,r.x+r.w); maxY=Math.max(maxY,r.y+r.h); });
+  minX-=S.regionMode?60:110; maxX+=40; minY-=30; maxY+=30;       // 给左侧回环线与注释留白
   const capH=$('cap').offsetHeight+24;                            // 底部说明卡占用的高度
   const vw=viewport.clientWidth-(S.selected&&!isMobile()?$('drawer').offsetWidth:0), vh=viewport.clientHeight-capH;
   const ns=Math.min(1.4,Math.min(vw/(maxX-minX),vh/(maxY-minY)));
@@ -1163,6 +1238,7 @@ function toggleTheme(){ setTheme(document.documentElement.dataset.theme==='dark'
 function setLang(l){
   if(l===S.lang) return; S.lang=l; store.set('lang',l);
   applyI18n(); render(false);
+  if(S.regionMode) fit();                        // 全景区块宽度随文案长度变化
   if(S.selected) openDrawer(S.selected);
   updateQueryInfo();
 }
