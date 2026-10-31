@@ -208,6 +208,13 @@ button{font:inherit;color:inherit}
 .anno{position:absolute;transform:translate(-50%,-50%);font-size:10px;line-height:1.3;color:var(--text-2);white-space:nowrap;
   background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:2px 8px;box-shadow:var(--shadow-sm)}
 .anno.left{transform:translate(-100%,-50%)}
+/* 全景干线：跨区块连线按区块对聚合 */
+.trunk{fill:none;stroke:var(--text-3);stroke-linecap:round;opacity:.5;transition:opacity .15s}
+.trunk.dim{opacity:.12}
+.thit{fill:none;stroke:transparent;stroke-width:16;pointer-events:stroke;cursor:help}
+.thit:hover+.trunk{opacity:.9;stroke:var(--accent)}
+.tlabel{position:absolute;transform:translate(-50%,-50%);font:600 10px/1 var(--mono);color:var(--text-2);white-space:nowrap;
+  background:var(--surface);border:1px solid var(--border-strong);border-radius:999px;padding:3px 7px;box-shadow:var(--shadow-sm)}
 .anno.cur{color:var(--accent);border-color:var(--accent-ring);background:color-mix(in srgb,var(--accent) 8%,var(--surface))}
 
 /* ===== 浮层：说明卡 / 缩放 / 图例 ===== */
@@ -329,6 +336,7 @@ button{font:inherit;color:inherit}
       <button class="mi" id="m_reset" role="menuitem"><span data-i18n="btnReset"></span><kbd>R</kbd></button>
       <hr>
       <button class="mi" id="m_anno" role="menuitem"><span data-i18n="mAnno"></span><em id="m_anno_v"></em></button>
+      <button class="mi" id="m_edges" role="menuitem"><span data-i18n="mEdges"></span><em id="m_edges_v"></em></button>
       <button class="mi" id="m_legend" role="menuitem"><span data-i18n="btnLegend"></span><kbd>L</kbd></button>
       <hr>
       <div class="hint" data-i18n="hint"></div>
@@ -702,7 +710,7 @@ const I18N = {
     railHead:'层级', searchPh:'搜索节点…  /',
     btnNext:'展开一层', btnPlay:'▶▶ 播放', btnPause:'⏸ 暂停',
     btnMin:'回到最浅层', btnMax:'展开到全景', btnFit:'自适应', btnReset:'复位布局', btnLegend:'图例',
-    mAnno:'连线注释', annoL:'本层', annoA:'全部', annoOff:'关闭', mLang:'语言', mTheme:'主题', themeDark:'深色', themeLight:'浅色',
+    mAnno:'连线注释', annoL:'本层', annoA:'全部', annoOff:'关闭', mEdges:'全景连线', edgesTrunk:'干线', edgesAll:'全部', mLang:'语言', mTheme:'主题', themeDark:'深色', themeLight:'浅色',
     aRail:'层级菜单', aPrev:'上一层', aTheme:'切换主题', aMore:'更多',
     layerFmt:(n,tot,code,title)=>`第 <b>${n}</b>/${tot} 层<span class="code">${code}</span><b>${title}</b>`,
     inCur:n=>`本层命中 ${n} 个 · 回车定位`, deepHint:n=>`更深层命中 ${n} 个 · 回车跳转`, noMatch:'无匹配',
@@ -720,7 +728,7 @@ const I18N = {
     railHead:'Layers', searchPh:'Search nodes…  /',
     btnNext:'Expand layer', btnPlay:'▶▶ Play', btnPause:'⏸ Pause',
     btnMin:'Back to first layer', btnMax:'Expand to full view', btnFit:'Fit', btnReset:'Reset layout', btnLegend:'Legend',
-    mAnno:'Edge notes', annoL:'This layer', annoA:'All', annoOff:'Off', mLang:'Language', mTheme:'Theme', themeDark:'Dark', themeLight:'Light',
+    mAnno:'Edge notes', annoL:'This layer', annoA:'All', annoOff:'Off', mEdges:'Full-view edges', edgesTrunk:'Trunks', edgesAll:'All', mLang:'Language', mTheme:'Theme', themeDark:'Dark', themeLight:'Light',
     aRail:'Layer menu', aPrev:'Previous layer', aTheme:'Toggle theme', aMore:'More',
     layerFmt:(n,tot,code,title)=>`Layer <b>${n}</b>/${tot}<span class="code">${code}</span><b>${title}</b>`,
     inCur:n=>`${n} on this layer · Enter to locate`, deepHint:n=>`${n} on deeper layers · Enter to jump`, noMatch:'No match',
@@ -748,7 +756,8 @@ const S={
   nodeOff:{}, edgeOff:{},          // 用户拖拽产生的偏移，换层时清空
   hover:null, selected:null, query:'',
   annoMode:0,                      // 0=本层 1=全部 2=关
-  regionMode:false, regionRects:[], // 全景层按区块排列
+  regionMode:false, regionRects:[], regionOf:{},   // 全景层按区块排列
+  edgeView: store.get('edges')==='all' ? 'all' : 'trunk',  // 全景跨区块连线：trunk=聚合干线 all=逐条
   pan:{x:0,y:0}, scale:1,
 };
 const $=id=>document.getElementById(id);
@@ -821,11 +830,11 @@ function regionLayout(nodes,size){
     b.w=cols*b.col+2*R_PADX; b.h=R_PADT+(rows-1)*R_ROW+R_PADB;
     const [c,r]=b.R.grid; colW[c]=Math.max(colW[c]||0,b.w); rowH[r]=Math.max(rowH[r]||0,b.h); });
   const offs=(m,k)=>{ let v=0; for(let i=0;i<k;i++) v+=(m[i]||0)+R_GAP; return v; };
-  const place={}, rects=[];
+  const place={}, rects=[], regionOf={};
   blocks.forEach(b=>{ const [c,r]=b.R.grid, bx=LEFT+offs(colW,c)+(colW[c]-b.w)/2, by=TOP+offs(rowH,r);
     rects.push({R:b.R,x:bx,y:by,w:b.w,h:rowH[r]});
-    b.at.forEach(([id,[col,row]])=>{ place[id]={cx:bx+R_PADX+col*b.col+b.col/2, top:by+R_PADT+row*R_ROW, rank:0}; }); });
-  return {place,rects};
+    b.at.forEach(([id,[col,row]])=>{ regionOf[id]=b.R.id; place[id]={cx:bx+R_PADX+col*b.col+b.col/2, top:by+R_PADT+row*R_ROW, rank:0}; }); });
+  return {place,rects,regionOf};
 }
 function drawRegions(){
   const el=$('regions'); el.classList.toggle('show',S.regionMode);
@@ -880,7 +889,7 @@ function render(animate){
   }
   S.regionMode=S.depth===LAYERS.length;
   let place;
-  if(S.regionMode){ const r=regionLayout(nodes,size); place=r.place; S.regionRects=r.rects; }
+  if(S.regionMode){ const r=regionLayout(nodes,size); place=r.place; S.regionRects=r.rects; S.regionOf=r.regionOf; }
   else { const {rank,x}=layout(nodes,edges); place={};
     nodes.forEach(n=>place[n.id]={cx:LEFT+x[n.id]*COL_W, top:TOP+rank[n.id]*ROW_H, rank:rank[n.id]}); }
   drawRegions();
@@ -913,8 +922,14 @@ function drawEdges(){
   let svg='',handles='',anno='',maxX=0,maxY=0,loopIdx=0;
   for(const id in S.box){ maxX=Math.max(maxX,S.box[id].right); maxY=Math.max(maxY,S.box[id].bottom); }
   const cur=S.depth-1;
+  // 全景干线模式：跨区块连线先收进 trunks，只有与悬停 / 选中节点相关的才逐条画出
+  const trunkMode=S.regionMode&&S.edgeView==='trunk', focus=S.hover||S.selected, trunks={};
   for(const e of S.graph.edges){
     const s=S.box[e.from],tb=S.box[e.to]; if(!s||!tb) continue;
+    if(trunkMode){ const ra=S.regionOf[e.from], rb=S.regionOf[e.to];
+      if(ra!==rb){ const k=ra<rb?ra+'|'+rb:rb+'|'+ra, T=trunks[k]=trunks[k]||{a:ra<rb?ra:rb,b:ra<rb?rb:ra,list:[],fwd:false,back:false};
+        T.list.push(e); if(ra===T.a) T.fwd=true; else T.back=true;
+        if(e.from!==focus&&e.to!==focus) continue; } }
     const key=ekey(e), off=edgeOffOf(e);
     // 走线：down=自上而下；up=自下而上；side=两侧水平；loop=绕到左侧回环。
     // 自动布局按层号判断；全景区块布局没有统一层号，按两端的相对位置判断，不用左侧回环。
@@ -959,13 +974,36 @@ function drawEdges(){
     }
     handles+=`<g class="eh" data-ekey="${key}"><circle class="ehit" cx="${hx}" cy="${hy}" r="13"/><circle class="ehandle${hov}" cx="${hx}" cy="${hy}" r="4"/></g>`;
   }
+  if(trunkMode){ const t=drawTrunks(trunks,!!focus); svg=t.svg+svg; anno+=t.anno; }
   edgesEl.innerHTML=markers()+svg+handles;
   edgesEl.setAttribute('width',maxX+140); edgesEl.setAttribute('height',maxY+60);
   annosEl.innerHTML=anno;
 }
+/* 区块间干线：连接两个区块边框，粗细随聚合条数增加；悬停干线可看到包含的连线 */
+function drawTrunks(trunks,dim){
+  const rect=Object.fromEntries(S.regionRects.map(r=>[r.R.id,r]));
+  // 从区块中心沿 (dx,dy) 方向射出，与边框的交点再外移 gap
+  const exit=(r,dx,dy,gap)=>{ const cx=r.x+r.w/2, cy=r.y+r.h/2, n=Math.hypot(dx,dy)||1;
+    const k=Math.min(dx?r.w/2/Math.abs(dx):Infinity, dy?r.h/2/Math.abs(dy):Infinity);
+    return [cx+dx*k+dx/n*gap, cy+dy*k+dy/n*gap]; };
+  let svg='', anno='';
+  for(const T of Object.values(trunks)){
+    const A=rect[T.a], B=rect[T.b]; if(!A||!B) continue;
+    const dx=(B.x+B.w/2)-(A.x+A.w/2), dy=(B.y+B.h/2)-(A.y+A.h/2);
+    const [x1,y1]=exit(A,dx,dy,6), [x2,y2]=exit(B,-dx,-dy,6), n=T.list.length;
+    const w=(1.6+Math.min(n,12)*.45).toFixed(2);
+    const tip=esc(T.list.map(e=>tx(S.graph.byId[e.from].label)+' → '+tx(S.graph.byId[e.to].label)).join('\n'));
+    const ends=(T.fwd?' marker-end="url(#ah-trunk)"':'')+(T.back?' marker-start="url(#ah-trunk)"':'');
+    svg+=`<g><title>${T.a} ${T.fwd&&T.back?'⇄':T.fwd?'→':'←'} ${T.b} · ×${n}\n${tip}</title>`
+      +`<path class="thit" d="M ${x1} ${y1} L ${x2} ${y2}"/><path class="trunk${dim?' dim':''}" style="stroke-width:${w}px"${ends} d="M ${x1} ${y1} L ${x2} ${y2}"/></g>`;
+    anno+=`<div class="tlabel" style="left:${(x1+x2)/2}px;top:${(y1+y2)/2}px">×${n}</div>`;
+  }
+  return {svg,anno};
+}
 function markers(){
   const mk=(id,c)=>`<marker id="${id}" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0.5 L8 4 L0 7.5 Z" fill="${c}"/></marker>`;
-  return `<defs>${mk('ah','var(--edge)')}${mk('ah-yes','var(--yes)')}${mk('ah-no','var(--no)')}${mk('ah-loop','var(--loop)')}${mk('ah-soft','var(--soft)')}</defs>`;
+  const trunkMk=`<marker id="ah-trunk" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto-start-reverse"><path d="M0 0.3 L5 2.5 L0 4.7 Z" fill="var(--text-3)"/></marker>`;
+  return `<defs>${trunkMk}${mk('ah','var(--edge)')}${mk('ah-yes','var(--yes)')}${mk('ah-no','var(--no)')}${mk('ah-loop','var(--loop)')}${mk('ah-soft','var(--soft)')}</defs>`;
 }
 
 /* ====================== 外围界面（顶栏 / 层级栏 / 说明卡 / 图例） ====================== */
@@ -1004,6 +1042,7 @@ function refreshLabels(){
   $('play').textContent=t(playing?'btnPause':'btnPlay');
   $('play').classList.toggle('on',!!playing);
   $('m_anno_v').textContent=t(['annoL','annoA','annoOff'][S.annoMode]);
+  $('m_edges_v').textContent=t(S.edgeView==='trunk'?'edgesTrunk':'edgesAll');
   const dark=document.documentElement.dataset.theme==='dark';
   $('themebtn').textContent=dark?'☾':'☀';
   $('m_theme_v').textContent=t(dark?'themeDark':'themeLight');
@@ -1189,11 +1228,13 @@ function openDrawer(id){
   list(S.graph.edges.filter(e=>e.from===id).map(e=>[e.to,e.label]),$('d_out'));
   drawer.classList.add('open'); drawer.setAttribute('aria-hidden','false');
   if(isMobile()) backdrop.classList.add('show');
+  if(S.regionMode) drawEdges();
 }
 function closeDrawer(){
   drawer.classList.remove('open'); drawer.setAttribute('aria-hidden','true'); S.selected=null;
   nodeEls.forEach(el=>el.classList.remove('sel'));
   if(!rail.classList.contains('open')) backdrop.classList.remove('show');
+  if(S.regionMode) drawEdges();
 }
 $('d_close').onclick=closeDrawer;
 
@@ -1229,11 +1270,13 @@ menuAct('m_min',()=>setDepth(1,true));
 menuAct('m_max',()=>setDepth(LAYERS.length,true));
 menuAct('m_reset',resetLayout);
 menuAct('m_anno',cycleAnno,true);
+menuAct('m_edges',toggleEdgeView,true);
 menuAct('m_legend',toggleLegend,true);
 menuAct('m_theme',toggleTheme,true);
 
 function resetLayout(){ S.nodeOff={}; S.edgeOff={}; render(true); setTimeout(fit,80); }
 function cycleAnno(){ S.annoMode=(S.annoMode+1)%3; refreshLabels(); drawEdges(); }
+function toggleEdgeView(){ S.edgeView=S.edgeView==='trunk'?'all':'trunk'; store.set('edges',S.edgeView); refreshLabels(); drawEdges(); }
 function toggleLegend(){ $('legend').classList.toggle('show'); refreshLabels(); }
 function setTheme(th,persist){ document.documentElement.dataset.theme=th; if(persist) store.set('theme',th); refreshLabels(); }
 function toggleTheme(){ setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark',true); }
