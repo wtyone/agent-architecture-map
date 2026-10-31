@@ -26,7 +26,7 @@
   --decision:#d97706; --decision-bg:#fff7e8; --decision-text:#7c3a0a;
   --match:rgba(22,163,74,.45);
   --d-core:#3b82f6; --d-tool:#0d9488; --d-perm:#e11d48; --d-hook:#d97706; --d-intel:#65a30d;
-  --d-mem:#7c3aed; --d-sys:#64748b; --d-team:#db2777; --d-trig:#059669; --d-ext:#0891b2;
+  --d-mem:#7c3aed; --d-sys:#64748b; --d-team:#db2777; --d-trig:#059669; --d-ext:#0891b2; --d-obs:#ea580c;
   --p-main:#0ea5e9; --p-aux:#22c55e; --p-ext:#ec4899;
   --shadow-sm:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08);
   --shadow-md:0 6px 20px rgba(16,24,40,.10),0 2px 6px rgba(16,24,40,.06);
@@ -45,7 +45,7 @@
   --decision:#f5b942; --decision-bg:#1d1909; --decision-text:#ffe7b0;
   --match:rgba(74,222,128,.5);
   --d-core:#60a5fa; --d-tool:#2dd4bf; --d-perm:#fb7185; --d-hook:#fbbf24; --d-intel:#a3e635;
-  --d-mem:#a78bfa; --d-sys:#94a3b8; --d-team:#f472b6; --d-trig:#34d399; --d-ext:#22d3ee;
+  --d-mem:#a78bfa; --d-sys:#94a3b8; --d-team:#f472b6; --d-trig:#34d399; --d-ext:#22d3ee; --d-obs:#fb923c;
   --p-main:#7dd3fc; --p-aux:#86efac; --p-ext:#f9a8d4;
   --shadow-sm:0 1px 2px rgba(0,0,0,.4);
   --shadow-md:0 8px 24px rgba(0,0,0,.4);
@@ -577,12 +577,29 @@ const LAYERS = [
   edges:[
     {"from":"mcp","to":"registry","k":"soft","label":{"zh":"工具并入","en":"tools merge"}}]},
 
-{ code:"u14", grp:"G8",
+{ code:"u14", grp:"G9",
+  title:{"zh":"可观测性与会话持久化","en":"Observability & Persistence"},
+  sub:{"zh":"<b>看得见</b>：span 追踪 + 用量计量，旁路上报、不阻塞主链；<b>丢不了</b>：会话日志追加写作为真相源，可恢复、可分叉、可回滚。","en":"<b>See it</b>: span tracing + usage metering, reported out-of-band without blocking the main chain; <b>never lose it</b>: an append-only session log as the source of truth — resumable, forkable, rewindable."},
+  nodes:[
+    {"id":"trace","dom":"obs","proc":"aux","label":{"zh":"追踪与日志","en":"Tracing & Logging"},"sub":{"zh":"span 树 · 回合 / 调用 / 工具","en":"span tree · turn / call / tool"},"d":{"zh":"把一次回合拆成 span 树：回合 → LLM 调用 → 工具调用 → 子代理，记录输入输出摘要、耗时、错误与重试次数。旁路异步上报，不阻塞主链；敏感字段要先脱敏。它是排查「模型为什么这么做」的唯一依据，也是做离线评测的数据来源。","en":"Break a turn into a span tree: turn → LLM call → tool call → subagent, recording input/output digests, latency, errors and retry counts. Reported asynchronously out-of-band, never blocking the main chain; sensitive fields are redacted first. It is the only evidence for “why did the model do that”, and the data source for offline evals."}},
+    {"id":"meter","dom":"obs","proc":"aux","label":{"zh":"用量与成本计量","en":"Usage & Cost Metering"},"sub":{"zh":"token · 缓存命中 · 预算闸","en":"tokens · cache hits · budget gate"},"d":{"zh":"按会话 / 用户 / agent 汇总 input、output、cache token 与费用；缓存命中率可以直接验证提示词分层是否生效。计量还能反过来做控制：会话预算、每日上限，超限时降级模型或拒绝新回合。","en":"Aggregate input / output / cache tokens and cost per session / user / agent; the cache-hit rate directly verifies whether prompt layering works. Metering also feeds back as control: session budgets and daily caps — over the limit, downgrade the model or refuse new turns."}},
+    {"id":"persist","dom":"obs","proc":"aux","label":{"zh":"会话持久化","en":"Session Persistence"},"sub":{"zh":"JSONL 追加 · 元数据 · 存档","en":"JSONL append · metadata · archive"},"d":{"zh":"每条消息（含 tool_use / tool_result）追加写入会话日志，并记录元数据（模型、工作目录、标题、父会话）。追加写天然崩溃安全；压缩前把原文存档。日志是真相源，上下文只是它当前的一个视图。","en":"Every message (including tool_use / tool_result) is appended to a session log, with metadata (model, working dir, title, parent session). Append-only writes are crash-safe by nature; full text is archived before compaction. The log is the source of truth; the context is only its current view."}},
+    {"id":"resume","dom":"obs","proc":"main","label":{"zh":"恢复与分叉","en":"Resume & Fork"},"sub":{"zh":"重放日志 → 重建 messages","en":"replay log → rebuild messages"},"d":{"zh":"从日志重放重建 messages[]：修补中断时留下的孤儿 tool_use（补一个错误结果），重新注入技能与记忆状态。分叉（fork）从任意消息点复制出新会话；回滚（rewind）截断日志，并可配合文件快照还原工作区。","en":"Replay the log to rebuild messages[]: repair orphaned tool_use left by an interruption (append an error result), re-inject skill and memory state. Fork copies a new session from any message point; rewind truncates the log and can restore the workspace with file snapshots."}}],
+  edges:[
+    {"from":"llm","to":"trace","k":"soft","label":{"zh":"span","en":"span"}},
+    {"from":"trace","to":"meter","label":{"zh":"汇总","en":"roll up"}},
+    {"from":"meter","to":"fix","k":"soft","label":{"zh":"预算闸","en":"budget gate"}},
+    {"from":"append","to":"persist","k":"soft","label":{"zh":"追加写","en":"append"}},
+    {"from":"compact","to":"persist","k":"soft","label":{"zh":"存档","en":"archive"}},
+    {"from":"persist","to":"resume"},
+    {"from":"resume","to":"trigger","k":"loop","label":{"zh":"恢复会话","en":"resume"}}]},
+
+{ code:"u15", grp:"G8",
   title:{"zh":"全景","en":"Full View"},
-  sub:{"zh":"<b>通用全景</b>：接入归一 → 调度择机 → 召回装配 → 钩子与权限护卫的核心循环 → 工具/技能/任务/子代理/后台/MCP 分发 → 压缩与韧性兜底 → 可靠送达 → 记忆沉淀反哺。任何 agent 系统都是这张图的子集 + 权重取舍。","en":"<b>Universal full view</b>: ingress normalize → schedule-when → recall & assemble → core loop guarded by hooks & permissions → dispatch to tools/skills/tasks/subagents/background/MCP → compaction & resilience backstop → reliable delivery → memory sedimentation feeds back. Any agent system is a subset of this map + a weight trade-off."},
+  sub:{"zh":"<b>通用全景</b>：接入归一 → 调度择机 → 召回装配 → 钩子与权限护卫的核心循环 → 工具/技能/任务/子代理/后台/MCP 分发 → 压缩与韧性兜底 → 可靠送达 → 记忆沉淀反哺；全程旁路追踪计量，会话日志落盘可恢复。任何 agent 系统都是这张图的子集 + 权重取舍。","en":"<b>Universal full view</b>: ingress normalize → schedule-when → recall & assemble → core loop guarded by hooks & permissions → dispatch to tools/skills/tasks/subagents/background/MCP → compaction & resilience backstop → reliable delivery → memory sedimentation feeds back; tracing & metering run alongside, and the session log makes everything resumable. Any agent system is a subset of this map + a weight trade-off."},
   relabel:[
     {"id":"registry","sub":{"zh":"本地·技能·任务·子代理·后台·MCP 统一分发","en":"built-in·skill·task·subagent·bg·MCP unified dispatch"}},
-    {"id":"trigger","sub":{"zh":"用户·网关·定时·心跳·唤醒 统一入口","en":"user·gateway·cron·heartbeat·wake unified entry"}}],
+    {"id":"trigger","sub":{"zh":"用户·网关·定时·心跳·唤醒·恢复 统一入口","en":"user·gateway·cron·heartbeat·wake·resume unified entry"}}],
   nodes:[
 ],
   edges:[
@@ -636,16 +653,23 @@ const NOTES = {
   "mcp→registry":{"zh":"外部工具并入注册表","en":"external tools merge into registry"},
   "suba→wt":{"zh":"并行改动互不踩","en":"parallel changes don’t stomp"},
   "h_pre→gate":{"zh":"权限 = 钩子上的策略","en":"permission = policy on hook"},
-  "autoa→lanes":{"zh":"认领到任务即进入调度","en":"claimed task enters scheduling"}
+  "autoa→lanes":{"zh":"认领到任务即进入调度","en":"claimed task enters scheduling"},
+  "llm→trace":{"zh":"每次调用记一个 span","en":"one span per call"},
+  "trace→meter":{"zh":"span 汇总成用量与成本","en":"spans roll up into usage & cost"},
+  "meter→fix":{"zh":"超预算 → 降级 / 拒绝","en":"over budget → downgrade / refuse"},
+  "append→persist":{"zh":"每条消息追加写盘","en":"every message appended to disk"},
+  "compact→persist":{"zh":"压缩前存档原文","en":"archive full text before compaction"},
+  "persist→resume":{"zh":"日志是真相源","en":"the log is the source of truth"},
+  "resume→trigger":{"zh":"重放日志，接着干","en":"replay the log, pick up where it left off"}
 };
 
-const DOMAINS = ['core','tool','perm','hook','intel','mem','sys','team','trig','ext'];
+const DOMAINS = ['core','tool','perm','hook','intel','mem','sys','team','trig','ext','obs'];
 const PROCS = ['main','aux','ext'];
 
 /* ====================== 文案 ====================== */
 const I18N = {
   zh:{
-    appTitle:'通用 Agent 架构地图', appSub:'与具体框架无关的通用结构 · u01→u14',
+    appTitle:'通用 Agent 架构地图', appSub:'与具体框架无关的通用结构 · u01→u15',
     railHead:'层级', searchPh:'搜索节点…  /',
     btnNext:'展开一层', btnPlay:'▶▶ 播放', btnPause:'⏸ 暂停',
     btnMin:'回到最浅层', btnMax:'展开到全景', btnFit:'自适应', btnReset:'复位布局', btnLegend:'图例',
@@ -658,12 +682,12 @@ const I18N = {
     lgDomains:'域配色', lgExec:'执行位置（节点圆点）', lgEdges:'连线',
     eYes:'是 / 放行', eNo:'否 / 拒绝', eLoop:'回环', eSoft:'旁路 / 注入',
     dom:{core:'核心循环',tool:'工具系统',perm:'权限与确认',hook:'生命周期钩子',intel:'上下文工程（提示词/技能）',
-         mem:'记忆与压缩',sys:'韧性',team:'规划 / 子代理 / 团队',trig:'触发与调度',ext:'接入 / 投递 / 外部集成'},
+         mem:'记忆与压缩',sys:'韧性',team:'规划 / 子代理 / 团队',trig:'触发与调度',ext:'接入 / 投递 / 外部集成',obs:'可观测与持久化'},
     proc:{main:'主循环同步路径',aux:'旁路 / 后台执行',ext:'宿主 / 外部系统'},
-    grp:{G1:'内核',G2:'安全与扩展点',G3:'上下文工程',G4:'韧性',G5:'规划与协作',G6:'触发与调度',G7:'接入与外部',G8:'全景'},
+    grp:{G1:'内核',G2:'安全与扩展点',G3:'上下文工程',G4:'韧性',G5:'规划与协作',G6:'触发与调度',G7:'接入与外部',G9:'可观测与持久化',G8:'全景'},
   },
   en:{
-    appTitle:'Universal Agent Architecture Map', appSub:'Framework-agnostic common structure · u01→u14',
+    appTitle:'Universal Agent Architecture Map', appSub:'Framework-agnostic common structure · u01→u15',
     railHead:'Layers', searchPh:'Search nodes…  /',
     btnNext:'Expand layer', btnPlay:'▶▶ Play', btnPause:'⏸ Pause',
     btnMin:'Back to first layer', btnMax:'Expand to full view', btnFit:'Fit', btnReset:'Reset layout', btnLegend:'Legend',
@@ -676,9 +700,9 @@ const I18N = {
     lgDomains:'Domain colors', lgExec:'Execution site (node dot)', lgEdges:'Edges',
     eYes:'yes / allow', eNo:'no / deny', eLoop:'loop back', eSoft:'bypass / inject',
     dom:{core:'Core loop',tool:'Tool system',perm:'Permission & confirm',hook:'Lifecycle hooks',intel:'Context eng. (prompt/skill)',
-         mem:'Memory & compaction',sys:'Resilience',team:'Planning / subagent / team',trig:'Trigger & schedule',ext:'I/O / delivery / external'},
+         mem:'Memory & compaction',sys:'Resilience',team:'Planning / subagent / team',trig:'Trigger & schedule',ext:'I/O / delivery / external',obs:'Observability & persistence'},
     proc:{main:'Main-loop sync path',aux:'Bypass / background',ext:'Host / external system'},
-    grp:{G1:'Core',G2:'Safety & Extension',G3:'Context Eng.',G4:'Resilience',G5:'Planning & Collab.',G6:'Trigger & Sched.',G7:'I/O & External',G8:'Full View'},
+    grp:{G1:'Core',G2:'Safety & Extension',G3:'Context Eng.',G4:'Resilience',G5:'Planning & Collab.',G6:'Trigger & Sched.',G7:'I/O & External',G9:'Observability',G8:'Full View'},
   }
 };
 
