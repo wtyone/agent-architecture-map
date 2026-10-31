@@ -377,7 +377,7 @@ button{font:inherit;color:inherit}
  * 数据约定：所有文案字段都是 {zh, en}。
  *   LAYERS[i] = { code, grp, title, sub, nodes[], edges[], hide?[[from,to]], relabel?[{id,label?,sub?}] }
  *   node      = { id, type?(start|end|decision), dom(域), proc(main|aux|ext), label, sub?, d }
- *   edge      = { from, to, k?(yes|no|loop|soft), label? }
+ *   edge      = { from, to, k?(yes|no|loop|soft), label?, bend?(默认水平弯折，绕开中间节点) }
  *   NOTES['from→to'] = 连线注释
  * ==========================================================================*/
 
@@ -416,22 +416,6 @@ const LAYERS = [
     {"from":"registry","to":"exec"}]},
 
 { code:"u03", grp:"G2",
-  title:{"zh":"权限与确认","en":"Permission & Confirm"},
-  sub:{"zh":"执行前的<b>策略链</b>：硬拒 → 规则 → 询问用户；拒绝作为错误结果回灌而不是中断循环。","en":"A <b>policy chain</b> before execution: hard-deny → rules → ask user; denial is fed back as an error result, not an interrupt."},
-  nodes:[
-    {"id":"gate","type":"decision","dom":"perm","proc":"main","label":{"zh":"权限策略链","en":"Permission Policy Chain"},"d":{"zh":"通用模式：先硬规则（危险命令永远拦，任何模式下都不可绕过）、再配置规则（allow/deny 列表逐条匹配）、拿不准才问人。生产系统会把它扩展成多级正交策略链（模式 × 上限 × 硬线）；无人值守的网关场景则退化为纯静态安全网——是否引入交互确认取决于「有没有人在旁边」。","en":"Common pattern: hard rules first (dangerous cmds always blocked, unbypassable), then config rules (allow/deny list, item-by-item), only ask a human when unsure. Production extends this into multi-level orthogonal chains (mode × ceiling × hardline); unattended gateways degenerate to a pure static safety net — whether to add interactive confirmation depends on “is a human around”."}},
-    {"id":"ask","dom":"perm","proc":"ext","label":{"zh":"询问用户 / 反向确认","en":"Ask User / Reverse Confirm"},"sub":{"zh":"y/N → 弹窗 → 反向 RPC","en":"y/N → dialog → reverse RPC"},"d":{"zh":"确认通道随宿主进化：终端 y/N → GUI 弹窗 → 协议化反向 RPC（ask/reply 信封，带 call_id 配对、可改写入参、可本会话放行）。模型主动提问（结构化选择题）也复用同一通道。","en":"The confirmation channel evolves with the host: terminal y/N → GUI dialog → protocolized reverse RPC (ask/reply envelope with call_id pairing, writable args, session-scoped allow). The model’s active questions (structured multiple-choice) reuse the same channel."}},
-    {"id":"blocked","dom":"perm","proc":"main","label":{"zh":"拒绝 → 错误结果","en":"Deny → Error Result"},"d":{"zh":"关键设计：拒绝不是异常而是信息——作为错误 tool_result 回灌，模型据此换路走，回合不中断。","en":"Key design: a denial is information, not an exception — fed back as an error tool_result, the model picks another path, the turn is not interrupted."}}],
-  hide:[["registry","exec"]],
-  edges:[
-    {"from":"registry","to":"gate"},
-    {"from":"gate","to":"exec","k":"yes","label":{"zh":"allow","en":"allow"}},
-    {"from":"gate","to":"ask","label":{"zh":"ask","en":"ask"}},
-    {"from":"ask","to":"exec","k":"yes","label":{"zh":"批准","en":"approve"}},
-    {"from":"ask","to":"blocked","k":"no","label":{"zh":"拒绝","en":"deny"}},
-    {"from":"blocked","to":"append"}]},
-
-{ code:"u04", grp:"G2",
   title:{"zh":"生命周期钩子","en":"Lifecycle Hooks"},
   sub:{"zh":"循环关键拍点开放<b>可编程扩展点</b>：输入前 / 工具前后 / 收敛时，可拦截可注入。","en":"Key beats of the loop open up <b>programmable extension points</b>: pre-input / pre & post tool / on converge — interceptable & injectable."},
   nodes:[
@@ -450,7 +434,37 @@ const LAYERS = [
     {"from":"check","to":"h_stop","k":"no","label":{"zh":"no","en":"no"}},
     {"from":"h_stop","to":"out"}]},
 
-{ code:"u05", grp:"G3",
+{ code:"u04", grp:"G2",
+  title:{"zh":"权限与确认","en":"Permission & Confirm"},
+  sub:{"zh":"执行前的<b>策略链</b>：硬拒 → 规则 → 询问用户。它本质上是挂在工具前钩子上的一条策略；拒绝作为错误结果回灌而不是中断循环。","en":"A <b>policy chain</b> before execution: hard-deny → rules → ask user. It is essentially a policy hung on the pre-tool hook; denial is fed back as an error result, not an interrupt."},
+  nodes:[
+    {"id":"gate","type":"decision","dom":"perm","proc":"main","label":{"zh":"权限策略链","en":"Permission Policy Chain"},"d":{"zh":"通用模式：先硬规则（危险命令永远拦，任何模式下都不可绕过）、再配置规则（allow/deny 列表逐条匹配）、拿不准才问人。生产系统会把它扩展成多级正交策略链（模式 × 上限 × 硬线）；无人值守的网关场景则退化为纯静态安全网——是否引入交互确认取决于「有没有人在旁边」。","en":"Common pattern: hard rules first (dangerous cmds always blocked, unbypassable), then config rules (allow/deny list, item-by-item), only ask a human when unsure. Production extends this into multi-level orthogonal chains (mode × ceiling × hardline); unattended gateways degenerate to a pure static safety net — whether to add interactive confirmation depends on “is a human around”."}},
+    {"id":"ask","dom":"perm","proc":"ext","label":{"zh":"询问用户 / 反向确认","en":"Ask User / Reverse Confirm"},"sub":{"zh":"y/N → 弹窗 → 反向 RPC","en":"y/N → dialog → reverse RPC"},"d":{"zh":"确认通道随宿主进化：终端 y/N → GUI 弹窗 → 协议化反向 RPC（ask/reply 信封，带 call_id 配对、可改写入参、可本会话放行）。模型主动提问（结构化选择题）也复用同一通道。","en":"The confirmation channel evolves with the host: terminal y/N → GUI dialog → protocolized reverse RPC (ask/reply envelope with call_id pairing, writable args, session-scoped allow). The model’s active questions (structured multiple-choice) reuse the same channel."}},
+    {"id":"blocked","dom":"perm","proc":"main","label":{"zh":"拒绝 → 错误结果","en":"Deny → Error Result"},"d":{"zh":"关键设计：拒绝不是异常而是信息——作为错误 tool_result 回灌，模型据此换路走，回合不中断。","en":"Key design: a denial is information, not an exception — fed back as an error tool_result, the model picks another path, the turn is not interrupted."}}],
+  hide:[["registry","exec"]],
+  edges:[
+    {"from":"registry","to":"gate"},
+    {"from":"gate","to":"exec","k":"yes","label":{"zh":"allow","en":"allow"}},
+    {"from":"gate","to":"ask","label":{"zh":"ask","en":"ask"}},
+    {"from":"ask","to":"exec","k":"yes","label":{"zh":"批准","en":"approve"}},
+    {"from":"ask","to":"blocked","k":"no","label":{"zh":"拒绝","en":"deny"}},
+    {"from":"blocked","to":"append"},
+    {"from":"h_pre","to":"gate","k":"soft","bend":-140,"label":{"zh":"策略挂载","en":"policy on hook"}}]},
+
+{ code:"u05", grp:"G4",
+  title:{"zh":"韧性","en":"Resilience"},
+  sub:{"zh":"LLM 调用包进<b>恢复引擎</b>：分类 → 退避重试 / 换凭据 / 降级模型 / 应急压缩 → 重跑。","en":"LLM calls wrapped in a <b>recovery engine</b>: classify → backoff retry / swap creds / downgrade model / emergency compact → rerun."},
+  nodes:[
+    {"id":"err","type":"decision","dom":"sys","proc":"main","label":{"zh":"调用 OK ?","en":"Call OK ?"},"d":{"zh":"区分可恢复（限流/过载/超时/截断/上下文超长）与不可恢复。失败分类决定策略——这是三个实现完全趋同的模式。","en":"Separate recoverable (rate-limit / overload / timeout / truncation / context-too-long) from unrecoverable. Failure classification decides strategy — a pattern three impls fully converge on."}},
+    {"id":"fix","dom":"sys","proc":"main","label":{"zh":"恢复策略","en":"Recovery Strategy"},"sub":{"zh":"退避 · 换凭据 · 降级 · 压缩","en":"backoff · swap creds · downgrade · compact"},"d":{"zh":"通用工具箱：指数退避+jitter、连续失败切降级模型、max_tokens 升档再续写、prompt_too_long 应急压缩。高可用场景再加一层：多凭据池轮换（每个 key 按失败类型进入不同时长的冷却，全部耗尽才降级模型）——把「换 key」放在「换模型」之前。","en":"Common toolkit: exponential backoff + jitter, switch to a downgrade model on consecutive failures, bump max_tokens then continue, emergency compaction on prompt_too_long. High-availability adds: a multi-credential pool rotation (each key enters a failure-type cooldown, downgrade model only when all exhausted) — “swap key” before “swap model”."}}],
+  hide:[["llm","check"]],
+  edges:[
+    {"from":"llm","to":"err"},
+    {"from":"err","to":"check","k":"yes","label":{"zh":"ok","en":"ok"}},
+    {"from":"err","to":"fix","k":"no","label":{"zh":"error","en":"error"}},
+    {"from":"fix","to":"llm","k":"loop"}]},
+
+{ code:"u06", grp:"G3",
   title:{"zh":"提示词与技能","en":"Prompts & Skills"},
   sub:{"zh":"<b>系统提示分层装配</b>（静态段缓存友好、动态段每轮重算）+ <b>技能渐进披露</b>（目录先行、按需读全文）。","en":"<b>Layered system-prompt assembly</b> (cache-friendly static segments, per-turn dynamic) + <b>progressive skill disclosure</b> (catalog first, full text on demand)."},
   nodes:[
@@ -463,7 +477,7 @@ const LAYERS = [
     {"from":"registry","to":"skload","label":{"zh":"skill","en":"skill"}},
     {"from":"skload","to":"append"}]},
 
-{ code:"u06", grp:"G3",
+{ code:"u07", grp:"G3",
   title:{"zh":"上下文压缩","en":"Context Compaction"},
   sub:{"zh":"回灌前查预算：<b>无 LLM 预剪枝优先，超限才 LLM 摘要</b>；另备 prompt_too_long 应急路径。","en":"Check budget before feed-back: <b>LLM-free pre-pruning first, LLM summary only when over limit</b>; plus a prompt_too_long emergency path."},
   nodes:[
@@ -476,7 +490,7 @@ const LAYERS = [
     {"from":"budget","to":"compact","label":{"zh":"超限","en":"over"}},
     {"from":"compact","to":"llm","k":"loop"}]},
 
-{ code:"u07", grp:"G3",
+{ code:"u08", grp:"G3",
   title:{"zh":"记忆系统","en":"Memory System"},
   sub:{"zh":"完整闭环：<b>开局召回 → 过程观察 → 回合末门控沉淀 → 后台整理衰减</b>，反哺下一轮。","en":"A full closed loop: <b>open recall → in-turn observation → gated sedimentation at turn end → background curation & decay</b>, feeding back into the next turn."},
   nodes:[
@@ -493,19 +507,6 @@ const LAYERS = [
     {"from":"sediment","to":"curate"},
     {"from":"curate","to":"recall","k":"loop","label":{"zh":"反哺下轮","en":"feeds next turn"}}]},
 
-{ code:"u08", grp:"G4",
-  title:{"zh":"韧性","en":"Resilience"},
-  sub:{"zh":"LLM 调用包进<b>恢复引擎</b>：分类 → 退避重试 / 换凭据 / 降级模型 / 应急压缩 → 重跑。","en":"LLM calls wrapped in a <b>recovery engine</b>: classify → backoff retry / swap creds / downgrade model / emergency compact → rerun."},
-  nodes:[
-    {"id":"err","type":"decision","dom":"sys","proc":"main","label":{"zh":"调用 OK ?","en":"Call OK ?"},"d":{"zh":"区分可恢复（限流/过载/超时/截断/上下文超长）与不可恢复。失败分类决定策略——这是三个实现完全趋同的模式。","en":"Separate recoverable (rate-limit / overload / timeout / truncation / context-too-long) from unrecoverable. Failure classification decides strategy — a pattern three impls fully converge on."}},
-    {"id":"fix","dom":"sys","proc":"main","label":{"zh":"恢复策略","en":"Recovery Strategy"},"sub":{"zh":"退避 · 换凭据 · 降级 · 压缩","en":"backoff · swap creds · downgrade · compact"},"d":{"zh":"通用工具箱：指数退避+jitter、连续失败切降级模型、max_tokens 升档再续写、prompt_too_long 应急压缩。高可用场景再加一层：多凭据池轮换（每个 key 按失败类型进入不同时长的冷却，全部耗尽才降级模型）——把「换 key」放在「换模型」之前。","en":"Common toolkit: exponential backoff + jitter, switch to a downgrade model on consecutive failures, bump max_tokens then continue, emergency compaction on prompt_too_long. High-availability adds: a multi-credential pool rotation (each key enters a failure-type cooldown, downgrade model only when all exhausted) — “swap key” before “swap model”."}}],
-  hide:[["llm","check"]],
-  edges:[
-    {"from":"llm","to":"err"},
-    {"from":"err","to":"check","k":"yes","label":{"zh":"ok","en":"ok"}},
-    {"from":"err","to":"fix","k":"no","label":{"zh":"error","en":"error"}},
-    {"from":"fix","to":"llm","k":"loop"}]},
-
 { code:"u09", grp:"G5",
   title:{"zh":"规划与任务","en":"Planning & Tasks"},
   sub:{"zh":"<b>计划外显</b>：todo 清单 + 提醒注入对抗遗忘；升级为持久任务图后依赖解锁驱动多 agent 协作。","en":"<b>Externalize the plan</b>: a todo list + nag injection against forgetting; upgraded to a persistent task graph, dependency-unlocking drives multi-agent collaboration."},
@@ -520,26 +521,27 @@ const LAYERS = [
 
 { code:"u10", grp:"G5",
   title:{"zh":"子代理与团队","en":"Subagents & Teams"},
-  sub:{"zh":"<b>上下文隔离</b>是本质：子代理全新 messages[] 只回摘要；团队用消息总线 + 请求/响应协议 + 自治认领。","en":"<b>Context isolation</b> is the essence: a subagent gets a fresh messages[] and returns only a summary; teams use a message bus + request/response protocol + autonomous claiming."},
+  sub:{"zh":"<b>上下文隔离</b>是本质：子代理全新 messages[] 只回摘要，并行改动放进 worktree / 沙箱互不踩；团队用消息总线 + 请求/响应协议协作。","en":"<b>Context isolation</b> is the essence: a subagent gets a fresh messages[] and returns only a summary, parallel changes run in a worktree / sandbox; teams collaborate via a message bus + request/response protocol."},
   nodes:[
     {"id":"suba","dom":"team","proc":"aux","label":{"zh":"子代理","en":"Subagent"},"sub":{"zh":"隔离上下文 · 摘要回传 · 轮数上限","en":"isolated ctx · summary back · turn cap"},"d":{"zh":"开一个全新上下文的子循环跑子任务，只把摘要带回父循环——父上下文不被子任务的过程噪音污染。受限工具集 + 轮数上限 + 嵌套深度限制是标配安全绳。","en":"Open a sub-loop with a fresh context to run the subtask, bring only a summary back to the parent — the parent context isn’t polluted by the subtask’s process noise. A restricted toolset + turn cap + nesting-depth limit are the standard safety ropes."}},
     {"id":"bus","dom":"team","proc":"aux","label":{"zh":"消息总线 + 协议","en":"Message Bus + Protocol"},"sub":{"zh":"邮箱 · request_id 配对","en":"mailbox · request_id pairing"},"d":{"zh":"多 agent 长期协作需要通信基础设施：文件邮箱/进程消息，再叠加请求/响应协议（request_id 精确配对、类型校验、去重）避免自由文本歧义。回报注入 lead 的 history 而不只是打印。","en":"Long-term multi-agent collaboration needs comms infra: file mailboxes / process messages, layered with a request/response protocol (request_id exact pairing, type check, dedupe) to avoid free-text ambiguity. Reports inject into the lead’s history, not just printed."}},
-    {"id":"autoa","type":"start","dom":"team","proc":"aux","label":{"zh":"自治认领","en":"Autonomous Claim"},"sub":{"zh":"空闲轮询 · 扫描可认领任务","en":"idle poll · scan claimable"},"d":{"zh":"把「等指令」换成「找活干」：空闲时轮询收件箱与任务图，可认领（依赖齐+无 owner）就自动认领转工作态；超时自动退出。任务图与团队在此闭环成自驱系统。","en":"Replace “wait for instruction” with “find work”: when idle, poll the inbox and task graph, and if a task is claimable (deps met + no owner) auto-claim and go to work; auto-exit on timeout. The task graph and team close the loop into a self-driving system here."}}],
+    {"id":"wt","dom":"ext","proc":"aux","label":{"zh":"执行隔离","en":"Execution Isolation"},"sub":{"zh":"worktree / 沙箱 · keep/remove","en":"worktree / sandbox · keep/remove"},"d":{"zh":"并行子任务各在独立 git worktree（或沙箱）里跑，互不踩文件；结束时有变更拒删除（除非显式丢弃），keep 保留供审查——把「隔离」从上下文扩展到文件系统。","en":"Parallel subtasks each run in an isolated git worktree (or sandbox), not stomping each other’s files; on exit, refuse deletion if there are changes (unless explicitly discarded), keep to retain for review — extending “isolation” from context to the filesystem."}}],
   edges:[
     {"from":"registry","to":"suba","label":{"zh":"委派","en":"delegate"}},
     {"from":"suba","to":"append","label":{"zh":"摘要","en":"summary"}},
     {"from":"suba","to":"bus","k":"soft","label":{"zh":"团队通信","en":"team comms"}},
     {"from":"bus","to":"append","label":{"zh":"回报注入","en":"report inject"}},
-    {"from":"autoa","to":"taskgraph","label":{"zh":"自动认领","en":"auto-claim"}}]},
+    {"from":"suba","to":"wt","k":"soft","label":{"zh":"隔离运行","en":"isolated run"}}]},
 
 { code:"u11", grp:"G6",
   title:{"zh":"触发与调度","en":"Trigger & Schedule"},
-  sub:{"zh":"用户输入只是触发源之一：<b>cron / 心跳 / 后台完成通知</b>并列进入，并发调度层保证互不踩（用户优先）。","en":"User input is only one trigger source: <b>cron / heartbeat / background-completion notice</b> enter in parallel; a concurrency-scheduling layer keeps them from stomping (user first)."},
+  sub:{"zh":"用户输入只是触发源之一：<b>cron / 心跳 / 自治认领 / 后台完成通知</b>并列进入，并发调度层保证互不踩（用户优先）。","en":"User input is only one trigger source: <b>cron / heartbeat / autonomous claim / background-completion notice</b> enter in parallel; a concurrency-scheduling layer keeps them from stomping (user first)."},
   nodes:[
     {"id":"cron","type":"start","dom":"trig","proc":"aux","label":{"zh":"定时调度","en":"Cron Schedule"},"sub":{"zh":"durable store · 到点入队","en":"durable store · enqueue on time"},"d":{"zh":"任务落 durable store（重启恢复），调度线程到点入队，空闲时唤起一次 agent turn。one-shot 触发后自删；连续失败自动禁用。","en":"Tasks land in a durable store (recover on restart), a scheduler thread enqueues at the due time, and an idle wake-up triggers an agent turn. one-shot self-deletes after firing; consecutive failures auto-disable."}},
     {"id":"heart","type":"start","dom":"trig","proc":"aux","label":{"zh":"心跳 / 主动性","en":"Heartbeat / Proactivity"},"sub":{"zh":"周期自问 · 无事丢弃","en":"periodic self-ask · drop if idle"},"d":{"zh":"周期性让 agent 自问「有什么要做的」，配合去重与「无事标记丢弃」（HEARTBEAT_OK）避免刷屏。非阻塞抢锁保证用户消息永远优先。","en":"Periodically let the agent self-ask “anything to do”, with dedupe and a “nothing-to-do mark” (HEARTBEAT_OK) to avoid spamming. A non-blocking lock grab guarantees user messages always come first."}},
     {"id":"bgt","dom":"trig","proc":"aux","label":{"zh":"后台任务","en":"Background Task"},"sub":{"zh":"占位先回 · 完成通知回灌","en":"placeholder reply · completion notice"},"d":{"zh":"慢操作放后台：立即返回占位符不阻塞循环，完成后以通知块注入后续轮次。父 agent 可查询/停止。","en":"Slow operations go to the background: immediately return a placeholder without blocking the loop, and on completion inject a notice block into a later turn. The parent agent can query/stop it."}},
-    {"id":"lanes","dom":"trig","proc":"main","label":{"zh":"并发调度","en":"Concurrency Scheduling"},"sub":{"zh":"锁/车道 · 用户优先","en":"lock/lanes · user first"},"d":{"zh":"多触发源竞争同一个 agent 时需要调度层：最简是单锁（用户阻塞获取=优先，后台任务非阻塞尝试、抢不到就跳过）；升级为命名车道 FIFO（每类触发源各自排队、互不插队）；再往上是按会话隔离的实例池 + 状态机串行化。核心不变量：用户消息永远优先。","en":"With multiple sources competing for one agent you need a scheduling layer: simplest is a single lock (user blocks-to-acquire = priority, background non-blocking try, skip on miss); upgraded to named-lane FIFO (each source queues itself); further up, a per-session isolated instance pool + state-machine serialization. Core invariant: user messages always first."}}],
+    {"id":"lanes","dom":"trig","proc":"main","label":{"zh":"并发调度","en":"Concurrency Scheduling"},"sub":{"zh":"锁/车道 · 用户优先","en":"lock/lanes · user first"},"d":{"zh":"多触发源竞争同一个 agent 时需要调度层：最简是单锁（用户阻塞获取=优先，后台任务非阻塞尝试、抢不到就跳过）；升级为命名车道 FIFO（每类触发源各自排队、互不插队）；再往上是按会话隔离的实例池 + 状态机串行化。核心不变量：用户消息永远优先。","en":"With multiple sources competing for one agent you need a scheduling layer: simplest is a single lock (user blocks-to-acquire = priority, background non-blocking try, skip on miss); upgraded to named-lane FIFO (each source queues itself); further up, a per-session isolated instance pool + state-machine serialization. Core invariant: user messages always first."}},
+    {"id":"autoa","type":"start","dom":"team","proc":"aux","label":{"zh":"自治认领","en":"Autonomous Claim"},"sub":{"zh":"空闲轮询 · 扫描可认领任务","en":"idle poll · scan claimable"},"d":{"zh":"把「等指令」换成「找活干」：空闲时轮询收件箱与任务图，可认领（依赖齐+无 owner）就自动认领转工作态；超时自动退出。任务图与团队在此闭环成自驱系统。","en":"Replace “wait for instruction” with “find work”: when idle, poll the inbox and task graph, and if a task is claimable (deps met + no owner) auto-claim and go to work; auto-exit on timeout. The task graph and team close the loop into a self-driving system here."}}],
   hide:[["trigger","recall"]],
   edges:[
     {"from":"trigger","to":"lanes"},
@@ -547,7 +549,9 @@ const LAYERS = [
     {"from":"cron","to":"lanes","label":{"zh":"到期","en":"due"}},
     {"from":"heart","to":"lanes","label":{"zh":"tick","en":"tick"}},
     {"from":"registry","to":"bgt","label":{"zh":"后台","en":"bg"}},
-    {"from":"bgt","to":"append","label":{"zh":"完成通知","en":"done notice"}}]},
+    {"from":"bgt","to":"append","label":{"zh":"完成通知","en":"done notice"}},
+    {"from":"autoa","to":"taskgraph","label":{"zh":"扫描认领","en":"scan & claim"}},
+    {"from":"autoa","to":"lanes","label":{"zh":"认领即起跑","en":"claimed → run"}}]},
 
 { code:"u12", grp:"G7",
   title:{"zh":"接入与投递","en":"Ingress & Delivery"},
@@ -566,14 +570,12 @@ const LAYERS = [
     {"from":"deliver","to":"out"}]},
 
 { code:"u13", grp:"G7",
-  title:{"zh":"外部集成与隔离","en":"External Integration & Isolation"},
-  sub:{"zh":"<b>MCP</b> 把外部服务的工具并入注册表；<b>执行隔离</b>（worktree/沙箱）让并行改动互不踩。","en":"<b>MCP</b> merges external-service tools into the registry; <b>execution isolation</b> (worktree/sandbox) keeps parallel changes from stomping."},
+  title:{"zh":"MCP 外部集成","en":"MCP External Integration"},
+  sub:{"zh":"<b>MCP</b> 把外部服务的工具带命名空间并入注册表：工具池从静态常量变成每轮动态装配。","en":"<b>MCP</b> merges external-service tools into the registry under a namespace: the tool pool goes from a static constant to a per-turn dynamic assembly."},
   nodes:[
-    {"id":"mcp","dom":"ext","proc":"ext","label":{"zh":"MCP 外部工具","en":"MCP External Tools"},"sub":{"zh":"发现 → 命名空间并入","en":"discover → namespaced merge"},"d":{"zh":"连接外部 server 发现工具，带命名空间前缀并入注册表（不覆盖同名内置），调用打到外部执行。工具池从静态常量变成每轮动态装配。","en":"Connect to an external server, discover tools, merge them into the registry with a namespace prefix (no override of same-named built-ins), and route calls to external execution. The tool pool goes from a static constant to a per-turn dynamic assembly."}},
-    {"id":"wt","dom":"ext","proc":"aux","label":{"zh":"执行隔离","en":"Execution Isolation"},"sub":{"zh":"worktree / 沙箱 · keep/remove","en":"worktree / sandbox · keep/remove"},"d":{"zh":"并行子任务各在独立 git worktree（或沙箱）里跑，互不踩文件；结束时有变更拒删除（除非显式丢弃），keep 保留供审查——把「隔离」从上下文扩展到文件系统。","en":"Parallel subtasks each run in an isolated git worktree (or sandbox), not stomping each other’s files; on exit, refuse deletion if there are changes (unless explicitly discarded), keep to retain for review — extending “isolation” from context to the filesystem."}}],
+    {"id":"mcp","dom":"ext","proc":"ext","label":{"zh":"MCP 外部工具","en":"MCP External Tools"},"sub":{"zh":"发现 → 命名空间并入","en":"discover → namespaced merge"},"d":{"zh":"连接外部 server 发现工具，带命名空间前缀并入注册表（不覆盖同名内置），调用打到外部执行。工具池从静态常量变成每轮动态装配。","en":"Connect to an external server, discover tools, merge them into the registry with a namespace prefix (no override of same-named built-ins), and route calls to external execution. The tool pool goes from a static constant to a per-turn dynamic assembly."}}],
   edges:[
-    {"from":"mcp","to":"registry","k":"soft","label":{"zh":"工具并入","en":"tools merge"}},
-    {"from":"suba","to":"wt","k":"soft","label":{"zh":"隔离运行","en":"isolated run"}}]},
+    {"from":"mcp","to":"registry","k":"soft","label":{"zh":"工具并入","en":"tools merge"}}]},
 
 { code:"u14", grp:"G8",
   title:{"zh":"全景","en":"Full View"},
@@ -632,7 +634,9 @@ const NOTES = {
   "h_stop→deliver":{"zh":"出口过可靠投递","en":"egress through reliable delivery"},
   "deliver→out":{"zh":"分片 · 预写 · 退避","en":"shard · pre-write · backoff"},
   "mcp→registry":{"zh":"外部工具并入注册表","en":"external tools merge into registry"},
-  "suba→wt":{"zh":"并行改动互不踩","en":"parallel changes don’t stomp"}
+  "suba→wt":{"zh":"并行改动互不踩","en":"parallel changes don’t stomp"},
+  "h_pre→gate":{"zh":"权限 = 钩子上的策略","en":"permission = policy on hook"},
+  "autoa→lanes":{"zh":"认领到任务即进入调度","en":"claimed task enters scheduling"}
 };
 
 const DOMAINS = ['core','tool','perm','hook','intel','mem','sys','team','trig','ext'];
@@ -699,6 +703,7 @@ const t=(k,...a)=>{ const v=T(k); return typeof v==='function'?v(...a):v; };
 const tx=v=>v==null?'':(typeof v==='string'?v:(v[S.lang]??v.zh));      // 取双语字段
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const ekey=e=>e.from+'→'+e.to;
+const edgeOffOf=e=>S.edgeOff[ekey(e)]||(e.bend?{dx:e.bend,dy:0}:{dx:0,dy:0});
 const isMobile=()=>window.matchMedia('(max-width:760px)').matches;
 
 /* 每个节点首次出现时的元信息（搜索 / 深层跳转用） */
@@ -816,7 +821,7 @@ function drawEdges(){
   const cur=S.depth-1;
   for(const e of S.graph.edges){
     const s=S.box[e.from],tb=S.box[e.to]; if(!s||!tb) continue;
-    const key=ekey(e), off=S.edgeOff[key]||{dx:0,dy:0};
+    const key=ekey(e), off=edgeOffOf(e);
     const isLoop=e.k==='loop'||tb.rank<=s.rank;
     const cls=e.k==='yes'?'yes':e.k==='no'?'no':e.k==='soft'?'soft':isLoop?'loop':'';
     const hov=S.hover?((e.from===S.hover||e.to===S.hover)?' hi':' dim'):'';
@@ -980,7 +985,7 @@ const local=e=>{ const r=viewport.getBoundingClientRect(); return {x:e.clientX-r
 viewport.addEventListener('pointerdown',e=>{
   if(e.button>0) return;
   const handle=e.target.closest('.eh'), node=e.target.closest('.node');
-  if(handle&&!pts.size){ e.preventDefault(); const k=handle.dataset.ekey, o=S.edgeOff[k]||{dx:0,dy:0};
+  if(handle&&!pts.size){ e.preventDefault(); const k=handle.dataset.ekey, ed=S.graph.edges.find(x=>ekey(x)===k), o=ed?edgeOffOf(ed):{dx:0,dy:0};
     edrag={id:e.pointerId,key:k,sx:e.clientX,sy:e.clientY,dx0:o.dx,dy0:o.dy}; return; }
   if(node&&!pts.size){ e.preventDefault(); const id=node.dataset.id, p=S.pos[id];
     ndrag={pid:e.pointerId,id,el:node,sx:e.clientX,sy:e.clientY,ox:p.x,oy:p.y,moved:false}; node.style.zIndex=20; return; }
