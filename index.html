@@ -674,8 +674,8 @@ const NOTES = {
  *   grid=[列,行] 是区块在宏观网格中的位置；at={节点:[列,行]} 是节点在区块内的格位。
  *   网格排法是在「入口在左上、主流程 A→B→C→D 只向右或向下」的约束下，按跨区块连线总长度最短选出的。 */
 const REGIONS = [
-  { id:'A', dom:'trig', grid:[0,0], title:{zh:'入口、调度与任务',en:'Ingress, Scheduling & Tasks'},
-    at:{channels:[0,0],cron:[1,0],heart:[2,0],autoa:[3,0],resume:[4,0],route:[0,1],trigger:[1,2],taskgraph:[4,2],lanes:[2,3]} },
+  { id:'A', dom:'trig', grid:[0,0], title:{zh:'入口与调度',en:'Ingress & Scheduling'},
+    at:{channels:[0,0],cron:[1,0],heart:[2,0],resume:[3,0],route:[0,1],trigger:[1,2],lanes:[2,3]} },
   { id:'B', dom:'intel', grid:[0,1], title:{zh:'上下文装配',en:'Context Assembly'},
     at:{recall:[0,0],sysasm:[1,0],skills:[2,0],ctx:[1,1],h_in:[1,2]} },
   { id:'C', dom:'core', grid:[1,1], title:{zh:'核心循环',en:'Core Loop'},
@@ -683,7 +683,7 @@ const REGIONS = [
   { id:'D', dom:'tool', grid:[2,1], title:{zh:'工具与安全',en:'Tools & Safety'},
     at:{registry:[1,0],gate:[1,1],exec:[0,2],ask:[2,2],h_post:[0,3],blocked:[2,3],append:[1,4]} },
   { id:'E', dom:'team', grid:[2,2], title:{zh:'扩展能力',en:'Capabilities'},
-    at:{mcp:[0,0],skload:[1,0],todo:[0,1],bgt:[1,1],suba:[0,2],bus:[0,3],wt:[1,3]} },
+    at:{mcp:[0,0],skload:[1,0],autoa:[2,0],todo:[0,1],bgt:[1,1],taskgraph:[2,1],suba:[0,2],bus:[0,3],wt:[1,3]} },
   { id:'G', dom:'ext', grid:[0,2], title:{zh:'出口',en:'Egress'},
     at:{deliver:[0,0],out:[0,1]} },
   { id:'F', dom:'mem', grid:[1,2], title:{zh:'上下文治理',en:'Context Governance'},
