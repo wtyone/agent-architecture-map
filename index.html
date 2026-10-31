@@ -377,7 +377,7 @@ button{font:inherit;color:inherit}
  * 数据约定：所有文案字段都是 {zh, en}。
  *   LAYERS[i] = { code, grp, title, sub, nodes[], edges[], hide?[[from,to]], relabel?[{id,label?,sub?}] }
  *   node      = { id, type?(start|end|decision), dom(域), proc(main|aux|ext), label, sub?, d }
- *   edge      = { from, to, k?(yes|no|loop|soft), label?, bend?(默认水平弯折，绕开中间节点) }
+ *   edge      = { from, to, k?(yes|no|loop|soft), label?, bend?(默认水平弯折，绕开中间节点), lay?(false=不参与分层布局) }
  *   NOTES['from→to'] = 连线注释
  * ==========================================================================*/
 
@@ -584,15 +584,15 @@ const LAYERS = [
     {"id":"trace","dom":"obs","proc":"aux","label":{"zh":"追踪与日志","en":"Tracing & Logging"},"sub":{"zh":"span 树 · 回合 / 调用 / 工具","en":"span tree · turn / call / tool"},"d":{"zh":"把一次回合拆成 span 树：回合 → LLM 调用 → 工具调用 → 子代理，记录输入输出摘要、耗时、错误与重试次数。旁路异步上报，不阻塞主链；敏感字段要先脱敏。它是排查「模型为什么这么做」的唯一依据，也是做离线评测的数据来源。","en":"Break a turn into a span tree: turn → LLM call → tool call → subagent, recording input/output digests, latency, errors and retry counts. Reported asynchronously out-of-band, never blocking the main chain; sensitive fields are redacted first. It is the only evidence for “why did the model do that”, and the data source for offline evals."}},
     {"id":"meter","dom":"obs","proc":"aux","label":{"zh":"用量与成本计量","en":"Usage & Cost Metering"},"sub":{"zh":"token · 缓存命中 · 预算闸","en":"tokens · cache hits · budget gate"},"d":{"zh":"按会话 / 用户 / agent 汇总 input、output、cache token 与费用；缓存命中率可以直接验证提示词分层是否生效。计量还能反过来做控制：会话预算、每日上限，超限时降级模型或拒绝新回合。","en":"Aggregate input / output / cache tokens and cost per session / user / agent; the cache-hit rate directly verifies whether prompt layering works. Metering also feeds back as control: session budgets and daily caps — over the limit, downgrade the model or refuse new turns."}},
     {"id":"persist","dom":"obs","proc":"aux","label":{"zh":"会话持久化","en":"Session Persistence"},"sub":{"zh":"JSONL 追加 · 元数据 · 存档","en":"JSONL append · metadata · archive"},"d":{"zh":"每条消息（含 tool_use / tool_result）追加写入会话日志，并记录元数据（模型、工作目录、标题、父会话）。追加写天然崩溃安全；压缩前把原文存档。日志是真相源，上下文只是它当前的一个视图。","en":"Every message (including tool_use / tool_result) is appended to a session log, with metadata (model, working dir, title, parent session). Append-only writes are crash-safe by nature; full text is archived before compaction. The log is the source of truth; the context is only its current view."}},
-    {"id":"resume","dom":"obs","proc":"main","label":{"zh":"恢复与分叉","en":"Resume & Fork"},"sub":{"zh":"重放日志 → 重建 messages","en":"replay log → rebuild messages"},"d":{"zh":"从日志重放重建 messages[]：修补中断时留下的孤儿 tool_use（补一个错误结果），重新注入技能与记忆状态。分叉（fork）从任意消息点复制出新会话；回滚（rewind）截断日志，并可配合文件快照还原工作区。","en":"Replay the log to rebuild messages[]: repair orphaned tool_use left by an interruption (append an error result), re-inject skill and memory state. Fork copies a new session from any message point; rewind truncates the log and can restore the workspace with file snapshots."}}],
+    {"id":"resume","type":"start","dom":"obs","proc":"main","label":{"zh":"恢复与分叉","en":"Resume & Fork"},"sub":{"zh":"重放日志 → 重建 messages","en":"replay log → rebuild messages"},"d":{"zh":"从日志重放重建 messages[]：修补中断时留下的孤儿 tool_use（补一个错误结果），重新注入技能与记忆状态。分叉（fork）从任意消息点复制出新会话；回滚（rewind）截断日志，并可配合文件快照还原工作区。","en":"Replay the log to rebuild messages[]: repair orphaned tool_use left by an interruption (append an error result), re-inject skill and memory state. Fork copies a new session from any message point; rewind truncates the log and can restore the workspace with file snapshots."}}],
   edges:[
     {"from":"llm","to":"trace","k":"soft","label":{"zh":"span","en":"span"}},
     {"from":"trace","to":"meter","label":{"zh":"汇总","en":"roll up"}},
-    {"from":"meter","to":"fix","k":"soft","label":{"zh":"预算闸","en":"budget gate"}},
+    {"from":"meter","to":"fix","k":"soft","lay":false,"label":{"zh":"预算闸","en":"budget gate"}},
     {"from":"append","to":"persist","k":"soft","label":{"zh":"追加写","en":"append"}},
-    {"from":"compact","to":"persist","k":"soft","label":{"zh":"存档","en":"archive"}},
-    {"from":"persist","to":"resume"},
-    {"from":"resume","to":"trigger","k":"loop","label":{"zh":"恢复会话","en":"resume"}}]},
+    {"from":"compact","to":"persist","k":"soft","lay":false,"label":{"zh":"存档","en":"archive"}},
+    {"from":"persist","to":"resume","k":"loop","label":{"zh":"重放","en":"replay"}},
+    {"from":"resume","to":"trigger","label":{"zh":"恢复会话","en":"resume"}}]},
 
 { code:"u15", grp:"G8",
   title:{"zh":"全景","en":"Full View"},
@@ -749,11 +749,11 @@ function computeGraph(depth){
 }
 
 /* ====================== 自动分层布局 ======================
- * 去掉回环边后做最长路径分层；再上下交替做重心排序，同层最小间距 1 列。 */
+ * 去掉回环边和 lay:false 的边后做最长路径分层；再上下交替做重心排序，同层最小间距 1 列。 */
 const COL_W=220, ROW_H=112, TOP=40, LEFT=100;
 function layout(nodes,edges){
   const has=Object.fromEntries(nodes.map(n=>[n.id,1]));
-  const fwd=edges.filter(e=>e.k!=='loop'&&has[e.from]&&has[e.to]);
+  const fwd=edges.filter(e=>e.k!=='loop'&&e.lay!==false&&has[e.from]&&has[e.to]);
   const adj={},radj={},indeg={},rank={};
   nodes.forEach(n=>{adj[n.id]=[];radj[n.id]=[];indeg[n.id]=0;rank[n.id]=0;});
   fwd.forEach(e=>{adj[e.from].push(e.to);radj[e.to].push(e.from);indeg[e.to]++;});
@@ -770,7 +770,7 @@ function layout(nodes,edges){
     for(const r of seq){ for(const id of ranks[r]||[]){ const nb=down?radj[id]:adj[id];
       if(nb.length) x[id]=nb.reduce((s,k)=>s+x[k],0)/nb.length; } resolve(r); }
   }
-  const mn=Math.min(0,...Object.values(x)); for(const id in x) x[id]-=mn;   // 列坐标归零，避免整体漂移
+  const mn=Math.min(...Object.values(x)); for(const id in x) x[id]-=mn;      // 列坐标归零，避免整体漂移
   return {rank,x};
 }
 
@@ -846,7 +846,8 @@ function drawEdges(){
   for(const e of S.graph.edges){
     const s=S.box[e.from],tb=S.box[e.to]; if(!s||!tb) continue;
     const key=ekey(e), off=edgeOffOf(e);
-    const isLoop=e.k==='loop'||tb.rank<=s.rank;
+    const sameRank=e.k!=='loop'&&tb.rank===s.rank;                       // lay:false 的边可能落在同一层
+    const isLoop=e.k==='loop'||(tb.rank<s.rank);
     const cls=e.k==='yes'?'yes':e.k==='no'?'no':e.k==='soft'?'soft':isLoop?'loop':'';
     const hov=S.hover?((e.from===S.hover||e.to===S.hover)?' hi':' dim'):'';
     const note=NOTES[key]?tx(NOTES[key]):'';
@@ -855,7 +856,15 @@ function drawEdges(){
     const lbl=e.label?esc(tx(e.label)):'';
     const mk='ah'+(cls?'-'+cls:'');
     let hx,hy;
-    if(isLoop){
+    if(sameRank){
+      // 同层：从相对的两侧水平连接
+      const rightward=tb.cx>=s.cx, sx=rightward?s.right:s.left, ex=rightward?tb.left:tb.right, sy=s.cy, ey=tb.cy;
+      const mx=(sx+ex)/2, my=(sy+ey)/2; hx=mx+off.dx; hy=my+off.dy;
+      const d=(off.dx||off.dy)?`M ${sx} ${sy} Q ${2*hx-mx} ${2*hy-my}, ${ex} ${ey}`:`M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ey}, ${ex} ${ey}`;
+      svg+=`<path class="e ${cls}${hov}" marker-end="url(#${mk})" d="${d}"/>`;
+      if(lbl) svg+=`<text class="elabel ${cls}${hov}" x="${mx}" y="${my-6}" text-anchor="middle">${lbl}</text>`;
+      if(showNote) anno+=`<div class="anno${curCls}" style="left:${hx}px;top:${hy+14}px">${note}</div>`;
+    } else if(isLoop){
       // 回环边绕到两端节点左侧；控制点 x 放大 4/3 使中点手柄 1:1 跟手（t=.5 处 x=(两端+6gx)/8）
       const gx=Math.min(s.left,tb.left)-34-(loopIdx++%3)*15+off.dx*4/3, sy=s.cy, ty=tb.cy, my=(sy+ty)/2;
       hx=(s.left+tb.left+6*gx)/8; hy=my;
